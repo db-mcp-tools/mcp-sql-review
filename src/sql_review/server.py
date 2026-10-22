@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dbmcp import register, make_server
+from dbcore.mcp_kit import make_server, register
 from sql_review import fix as FIX
 from sql_review import verify as VERIFY
 from sql_review import advisor as ADV

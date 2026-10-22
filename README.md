@@ -11,7 +11,7 @@ pip install ./mcp-sql-review              # 在工具链根目录下执行
 pip install "./mcp-sql-review[mysql]"     # 需要连库时补驱动，或 [postgres]
 ```
 
-会自动带上它需要的共享库：`dbt-core`（协议/方言/AST/计划）、`dbt-store`（发现写账本）、`dbt-mcp-kit`（MCP 外壳）。**不会**带其他 MCP。
+会自动带上它需要的共享库：`dbt-core`（协议/方言/AST/计划）、`dbt-store`（发现写账本）。**不会**带其他 MCP。
 
 ## 挂到 MCP 客户端
 
