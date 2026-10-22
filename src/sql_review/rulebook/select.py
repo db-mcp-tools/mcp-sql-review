@@ -178,6 +178,18 @@ def rule_cartesian(ast, ctx) -> list:
     """多表 JOIN 但没有任何跨表关联条件 → 笛卡尔积。"""
     if not isinstance(ast, exp.Select):
         return []
+    # CTE 名不是真实表：WITH t AS (SELECT ... FROM x) SELECT * FROM t 里，
+    # t 是定义出来的结果集，与 x 不是并列关系。漏掉这一步会把最普通的
+    # CTE 查询判成 blocker 级笛卡尔积，直接卡住 CI。
+    cte_names: set[str] = set()
+    # sqlglot 30 里 args 的 key 是 "with_"（带下划线），旧版本是 "with"。两个都试。
+    with_clause = ast.args.get("with_") or ast.args.get("with")
+    if with_clause is not None:
+        for cte in with_clause.expressions:
+            alias = getattr(cte, "alias_or_name", "") or getattr(cte, "alias", "")
+            if alias:
+                cte_names.add(alias)
+
     # 子查询/派生表内部的表与本层无 JOIN 关系，不能算进来
     top_tables: list[str] = []
     for t in ast.find_all(exp.Table):
@@ -188,7 +200,7 @@ def rule_cartesian(ast, ctx) -> list:
                 in_sub = True
                 break
             parent = parent.parent
-        if not in_sub:
+        if not in_sub and t.name not in cte_names:
             top_tables.append(t.name)
     tables = top_tables
     if len(tables) < 2:

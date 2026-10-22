@@ -82,10 +82,21 @@ fp_cases = [
     ("SELECT * FROM orders WHERE created_at > 1 LIMIT 20", "mysql", "TYPE001"),
     ("SELECT o.*, u.name FROM o JOIN u ON o.uid=u.id WHERE o.amount>100", "mysql", "JOIN002"),
     ("SELECT * FROM orders WHERE amount > 0 ORDER BY id LIMIT 10", "mysql", "SEL006"),
+    # CTE 名不是表：曾把 WITH t AS (... FROM x) SELECT * FROM t 判成 blocker 笛卡尔积
+    ("WITH t AS (SELECT id FROM x WHERE y=1) SELECT * FROM t", "mysql", "JOIN002"),
+    ("WITH a AS (SELECT id FROM x), b AS (SELECT id FROM y) "
+     "SELECT * FROM a JOIN b ON a.id=b.id", "mysql", "JOIN002"),
+    ("WITH t AS (SELECT id,pid FROM x) SELECT c.id FROM t c JOIN t p ON c.pid=p.id",
+     "mysql", "JOIN002"),
+    ("WITH a AS (SELECT 1 AS i), b AS (SELECT i FROM a) SELECT * FROM b", "mysql", "JOIN002"),
 ]
 for sql, dia, rid in fp_cases:
     got = rules_of(sql, dia)
     check(f"不误报 {rid}", rid not in got, f"{sql[:40]} -> {got}")
+
+# CTE 修复不能把真笛卡尔积一起放过
+check("CTE 与真表无关联仍报笛卡尔积",
+      "JOIN002" in rules_of("WITH t AS (SELECT id FROM x) SELECT * FROM t, y", "mysql"))
 
 # 分区键
 r_part = review_sql("SELECT * FROM orders WHERE amount > 10", "mysql",
