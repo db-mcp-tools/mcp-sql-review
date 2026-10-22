@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-sql-review"
+version = "0.2.0"
+description = "SQL 体检 MCP：31 条规则分册静态体检、自动修法、修复验证、执行计划对比、索引建议。Tier0 零依赖可用。"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "Proprietary"}
+
+dependencies = [
+    "dbt-core>=0.2.0",
+    "dbt-store>=0.2.0",
+    "dbt-mcp-kit>=0.2.0",
+]
+
+[project.optional-dependencies]
+mysql = ["pymysql>=1.1"]
+postgres = ["psycopg[binary]>=3.1"]
+
+[project.scripts]
+dbt-sql-review = "sql_review.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed", "*.yaml", "*.yml", "*.json"]
