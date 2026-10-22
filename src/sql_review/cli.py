@@ -1,9 +1,9 @@
 """命令行入口：SQL 体检 MCP：31 条规则分册静态体检、自动修法、修复验证、执行计划对比、索引建议。Tier0 零依赖可用。
 
 两条命令就够用（不需要记每个工具的参数）：
-    dbt-sql-review tools                       列出本 MCP 的全部工具
-    dbt-sql-review call <tool> --args '{"sql": "SELECT ..."}' [--json]
-    dbt-sql-review call <tool> --help-args     查看该工具的参数签名
+    mcp-sql-review tools                       列出本 MCP 的全部工具
+    mcp-sql-review call <tool> --args '{"sql": "SELECT ..."}' [--json]
+    mcp-sql-review call <tool> --help-args     查看该工具的参数签名
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def cmd_call(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="dbt-sql-review", description="SQL 体检 MCP：31 条规则分册静态体检、自动修法、修复验证、执行计划对比、索引建议。Tier0 零依赖可用。")
+    p = argparse.ArgumentParser(prog="mcp-sql-review", description="SQL 体检 MCP：31 条规则分册静态体检、自动修法、修复验证、执行计划对比、索引建议。Tier0 零依赖可用。")
     p.add_argument("--json", action="store_true", help="JSON 输出")
     sub = p.add_subparsers(dest="cmd", required=True)
 

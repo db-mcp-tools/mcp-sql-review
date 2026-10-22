@@ -1,0 +1,64 @@
+# 本文件由 scripts/gen-pyprojects.py 生成，不要手改。
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: py${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: 取回依赖仓 sqltk-core（尚未发到 PyPI，用同一 owner 下的源码）
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/sqltk-core
+          path: _deps/sqltk-core
+
+      - name: 取回依赖仓 sqltk-store（尚未发到 PyPI，用同一 owner 下的源码）
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/sqltk-store
+          path: _deps/sqltk-store
+
+      - name: 安装
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "_deps/sqltk-core[mcp]" -e "_deps/sqltk-store" -e "."
+          pip install ruff twine
+
+      - name: 静态检查
+        run: ruff check src tests
+
+      - name: 测试
+        run: |
+          for f in tests/test_*.py; do
+            echo "== $f"
+            python "$f"
+          done
+
+      - name: 打包元数据自检
+        run: |
+          python -m build --outdir _dist .
+          twine check _dist/*
+
+      - name: CLI 可用
+        run: mcp-sql-review tools | head -5

@@ -7,11 +7,11 @@
 ## 安装（按需，不必装其他 MCP）
 
 ```bash
-pip install ./mcp-sql-review              # 在工具链根目录下执行
-pip install "./mcp-sql-review[mysql]"     # 需要连库时补驱动，或 [postgres]
+pip install mcp-sql-review                        # 从 PyPI
+pip install "./mcp-sql-review[mysql]"             # 从源码（在工具链根目录执行）；要连库就补驱动，或 [postgres]
 ```
 
-会自动带上它需要的共享库：`dbt-core`（协议/方言/AST/计划）、`dbt-store`（发现写账本）。**不会**带其他 MCP。
+会自动带上它需要的共享库：`sqltk-core`（协议/方言/AST/计划）、`sqltk-store`（发现写账本）。**不会**带其他 MCP。
 
 ## 挂到 MCP 客户端
 
@@ -32,8 +32,8 @@ pip install "./mcp-sql-review[mysql]"     # 需要连库时补驱动，或 [post
 命令行调试（不挂客户端也能用）：
 
 ```bash
-dbt-sql-review tools
-dbt-sql-review call <tool> --args '{"sql": "SELECT 1"}'
+mcp-sql-review tools
+mcp-sql-review call <tool> --args '{"sql": "SELECT 1"}'
 ```
 
 ## 工具（14）
@@ -61,7 +61,7 @@ dbt-sql-review call <tool> --args '{"sql": "SELECT 1"}'
 
 ## Tier（冷启动保证）
 
-全部 `tier0`：零历史、零数据库可用。带 `instance_id` 调用时，发现会自动写入 `dbt-store` 的技术债账本（`open → fixed → verified`）。
+全部 `tier0`：零历史、零数据库可用。带 `instance_id` 调用时，发现会自动写入 `sqltk-store` 的技术债账本（`open → fixed → verified`）。
 
 ## 边界：这个仓不做什么
 
@@ -73,3 +73,7 @@ dbt-sql-review call <tool> --args '{"sql": "SELECT 1"}'
 ```bash
 python tests/test_sql_review.py      # 不需要 pytest，也不需要数据库
 ```
+
+## 许可
+
+MIT © 2026 罗文星 —— 见 [LICENSE](LICENSE)。

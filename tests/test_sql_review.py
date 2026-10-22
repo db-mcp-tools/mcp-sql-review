@@ -16,7 +16,7 @@ import tempfile
 _HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent / "src"))
 # 开发期：兄弟仓库用源码目录；正式使用请 pip install（见 README）
-for _sib in ("dbt-core", "dbt-store"):
+for _sib in ("sqltk-core", "sqltk-store"):
     _p = _HERE.parent.parent / _sib / "src"
     if _p.is_dir() and str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
