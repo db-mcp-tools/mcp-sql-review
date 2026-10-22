@@ -463,6 +463,7 @@ def extract_objects(sql: str, dialect: str = "mysql",
 def list_rules(category: str | None = None, severity: str | None = None,
                dialect: str | None = None, instance_id: str = "",
                correlation_id: str = "") -> Result:
+    """规则清单：按分类/严重度/方言过滤，并标出每条是否对当前方言生效。"""
     return Result(
         ok=True, mcp=MCP_NAME, tool="list_rules",
         data={"rules": RULES.list_rules(category, severity, dialect),
@@ -475,6 +476,7 @@ def list_rules(category: str | None = None, severity: str | None = None,
 
 
 def explain_rule(rule_id: str, instance_id: str = "", correlation_id: str = "") -> Result:
+    """解释一条规则：禁它的原因、什么情况下会误报、怎么改。"""
     info = RULES.explain_rule(rule_id)
     if info is None:
         raise ToolError("E_ARGS", f"未知规则 ID：{rule_id}")

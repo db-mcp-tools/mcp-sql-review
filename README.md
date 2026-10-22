@@ -42,12 +42,12 @@ dbt-sql-review call <tool> --args '{"sql": "SELECT 1"}'
 |---|---|
 | `advise_indexes` | 索引建议。已有重复索引或前缀已覆盖会直接劝退。 |
 | `compare_plans` | 对比改写前后的执行计划。**扫描行数反而上升会明确判为不可采用** |
-| `explain_rule` | — |
+| `explain_rule` | 解释一条规则：禁它的原因、什么情况下会误报、怎么改。 |
 | `explain_sql` | 取执行计划并归一化，标注可疑点。 |
 | `extract_objects` | 把 SQL 抽成结构化对象，供其它 MCP 直接消费（内部的分 Claim 提取实现在 dbcore.extract）。 |
 | `fingerprint_sql` | 生成 SQL 指纹与归一化形式（跨 MCP 关联键之一）。 |
 | `list_profiles` | 枚举可用的规则 profile（规则启停配置），用于在 review / review_batch 里套用。 |
-| `list_rules` | — |
+| `list_rules` | 规则清单：按分类/严重度/方言过滤，并标出每条是否对当前方言生效。 |
 | `review_batch` | 批量体检，输出 PASS/FAIL 门禁结论。fail_on 可选 critical\|high\|medium\|low |
 | `review_diff` | 只体检 git diff 中新增/修改的 SQL —— CI 门禁的真实用法。 |
 | `review_file` | 扫描文件/目录中的 SQL。支持 .sql / MyBatis XML / Java 注解与字符串常量。 |
