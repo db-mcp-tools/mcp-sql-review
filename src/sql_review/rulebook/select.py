@@ -137,12 +137,6 @@ def rule_join_without_on(ast, ctx) -> list:
     由 JOIN001 以低级别提示改写风格即可。
     """
     out = []
-    has_cross_cond = bool(_eq_pairs(ast))
-    where = ast.args.get("where")
-    has_semi = False
-    if where is not None:
-        has_semi = any(isinstance(n, (exp.In, exp.Exists)) and n.find(exp.Subquery) is not None
-                       for n in where.walk())
     for join in ast.find_all(exp.Join):
         if join.args.get("on") is not None or join.args.get("using") is not None:
             continue

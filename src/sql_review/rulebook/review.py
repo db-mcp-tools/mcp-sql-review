@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from sql_review.rulebook.core import (_dedup_findings, normalize_dialect, parse_statements)
-from sql_review.rulebook.profiles import PROFILES, resolve
+from sql_review.rulebook.profiles import resolve
 from sql_review.rulebook.registry import Rule, RuleRegistry, build
 
 
@@ -19,6 +19,7 @@ def review_sql(sql: str, dialect: str | None = None, *,
                enable: list[str] | None = None,
                only_categories: list[str] | None = None,
                only_severities: list[str] | None = None,
+               custom_rules: list[dict] | list[Rule] | None = None,
                **opts) -> Any:
     """对一段 SQL（可多句）做静态体检。
 
@@ -28,6 +29,8 @@ def review_sql(sql: str, dialect: str | None = None, *,
     disable: 本次额外禁用的规则 ID 列表（在 profile 之上叠加）。
     enable:  本次强制启用的规则 ID 列表（优先级最高）。
     only_categories / only_severities: 临时把生效集收窄到指定分类/严重度。
+    custom_rules: 自定义规则（P5 DSL）。传 dict 列表时自动 compile_rules 校验编译，
+        传 Rule 对象列表则原样使用；与内置规则一起执行，id 冲突会直接报错。
     **opts: 透传给规则上下文，如 partition_keys / deep_offset_threshold / table_rows。
     """
     from sql_review.rulebook.core import Finding, ReviewResult  # 延迟避免环
@@ -46,6 +49,19 @@ def review_sql(sql: str, dialect: str | None = None, *,
     active: list[Rule] = reg.filtered(dialect=d, categories=cats or None,
                                       severities=sevs or None,
                                       include=inc or None, exclude=exc or None)
+
+    if custom_rules:
+        from sql_review.rulebook.custom import compile_rules
+        extra = [r for r in custom_rules if isinstance(r, Rule)]
+        dicts = [r for r in custom_rules if isinstance(r, dict)]
+        if dicts:
+            extra.extend(compile_rules(dicts))
+        # 自定义规则不受 categories/severities 收窄影响（团队显式给出的就是生效集），
+        # 但 engines 方言限定照常生效：限定 mysql 的规则不该在 postgres 上触发
+        for r in extra:
+            if r.engines and d not in [e.lower() for e in r.engines]:
+                continue
+            active = list(active) + [r]
 
     stmts = parse_statements(sql, d)
     result.statement_count = len(stmts)

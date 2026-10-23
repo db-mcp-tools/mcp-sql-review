@@ -21,9 +21,10 @@ from sql_review.rulebook import (  # noqa: F401
     review_sql,
     rule_categories,
 )
+from sql_review.rulebook.custom import compile_rules, load_rules  # noqa: F401
 
 __all__ = [
     "SEVERITY_ORDER", "Finding", "ReviewResult", "RuleFn",
     "review_sql", "list_rules", "explain_rule", "rule_categories",
-    "RULE_META", "RULES", "build",
+    "RULE_META", "RULES", "build", "compile_rules", "load_rules",
 ]
