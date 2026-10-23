@@ -26,7 +26,7 @@ from sqlglot import exp
 # 日期时间列：与字符串字面量比较是**标准写法**（SQL 没有通用日期字面量），
 # 对它们报"隐式转换"纯属噪音。
 _DATE_LIKE_RE = re.compile(
-    r"(^|_)(at|date|dates|day|time|datetime|timestamp|ts|epoch"
+    r"(^|_)(at|date|dates|day|time|datetime|timestamp|ts|dt|ymd|epoch"
     r"|created|updated|deleted|expired|start|end|begin|finish)$",
     re.I,
 )

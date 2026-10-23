@@ -16,7 +16,15 @@ from sql_review.rulebook.core import (_eq_pairs, _literal_of, _mk, table_of)
 
 
 def rule_select_star(ast, ctx) -> list:
-    stars = list(ast.find_all(exp.Star)) if isinstance(ast, exp.Select) else []
+    if not isinstance(ast, exp.Select):
+        return []
+    # 只认 SELECT 列表里的裸星号或限定星号（t.*），不能 find_all 全盘扫描——
+    # 否则 COUNT(*) 里的星号也会被当成「SELECT *」误报。
+    stars = [
+        e for e in ast.expressions
+        if isinstance(e, exp.Star)
+        or (isinstance(e, exp.Column) and isinstance(getattr(e, "this", None), exp.Star))
+    ]
     return [
         _mk("SEL001", "low", "使用了 SELECT *",
             "显式列出字段：减少网络/内存开销，避免表结构变更导致的隐式破坏", s, table_of(ast))
@@ -139,8 +147,8 @@ def rule_join_without_on(ast, ctx) -> list:
         if join.args.get("on") is not None or join.args.get("using") is not None:
             continue
         explicit = bool(join.args.get("kind")) or bool(join.args.get("side"))
-        if not explicit and (has_cross_cond or has_semi):
-            continue                       # 逗号写法 + WHERE 里有关联条件 = 合法的旧风格
+        if not explicit:
+            continue                       # 逗号写法交给 JOIN001/JOIN002，避免与笛卡尔积重复报
         out.append(
             _mk("SEL007", "high",
                 "JOIN 缺少关联条件，会产生笛卡尔积",

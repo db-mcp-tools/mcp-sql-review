@@ -47,7 +47,8 @@ def rule_mysql_alter(ast, ctx) -> list:
         return []
     sql_text = ctx.get("_sql_text", "") or ""
     if re.search(r"\bALTER\s+TABLE\b", sql_text, re.I) and \
-            not re.search(r"\bALGORITHM\s*=|INSTANT|INPLACE", sql_text, re.I):
+            not re.search(r"\bALGORITHM\s*=|INSTANT|INPLACE", sql_text, re.I) and \
+            not re.search(r"\bMODIFY\b|\bCHANGE\s+(COLUMN\s+)?\w+", sql_text, re.I):
         return [_mk("MY001", "medium",
                     "ALTER TABLE 未指定 ALGORITHM/LOCK：不同版本默认行为差异很大，"
                     "5.6 上很多操作会 COPY 整表",
