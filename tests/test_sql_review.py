@@ -61,13 +61,20 @@ def rules_of(sql: str, dialect: str = "mysql", **kw) -> set[str]:
 hit_cases = [
     ("UPDATE t SET a=1", "mysql", "DML001"),
     ("SELECT * FROM a, b", "mysql", "JOIN002"),
-    ("SELECT id FROM u WHERE phone = '13800138000'", "mysql", "TYPE001"),
+    # 隐式转换的真身：数值列名 + 数字形态的字符串字面量
+    ("SELECT * FROM t WHERE amount = '100.50'", "mysql", "TYPE001"),
+    ("SELECT * FROM t WHERE user_id = '123'", "mysql", "TYPE001"),
+    # 非键列等值过滤 / 范围条件 —— 影响面真的不可控
+    ("UPDATE orders SET a=1 WHERE status='x'", "mysql", "DML002"),
+    ("UPDATE orders SET a=1 WHERE created_at > '2026-01-01'", "mysql", "DML002"),
     ("CREATE INDEX ix ON t (a)", "postgres", "PG001"),
     ("TRUNCATE TABLE t", "mysql", "DDL004"),
     ("DROP TABLE t", "mysql", "DDL005"),
     ("BEGIN; UPDATE t SET a=1 WHERE id=1; COMMIT;", "mysql", "TX002"),
+    # 相关子查询：引用外层列，才会每行跑一次
     ("SELECT uid, (SELECT n FROM u WHERE u.id=o.uid) FROM o", "mysql", "SUBQ001"),
-    ("SELECT * FROM o WHERE id IN (SELECT oid FROM p)", "mysql", "SUBQ002"),
+    ("SELECT * FROM o WHERE id IN (SELECT oid FROM p WHERE p.uid=o.uid)",
+     "mysql", "SUBQ002"),
     ("SELECT * FROM o JOIN u ON 1=1 JOIN p ON 1=1 JOIN c ON 1=1 JOIN d ON 1=1 "
      "JOIN e ON 1=1 JOIN f ON 1=1 JOIN g ON 1=1", "mysql", "JOIN003"),
 ]
@@ -89,6 +96,20 @@ fp_cases = [
     ("WITH t AS (SELECT id,pid FROM x) SELECT c.id FROM t c JOIN t p ON c.pid=p.id",
      "mysql", "JOIN002"),
     ("WITH a AS (SELECT 1 AS i), b AS (SELECT i FROM a) SELECT * FROM b", "mysql", "JOIN002"),
+    # --- 误报治理（2026-10）：判不出"这大概率是错的"就不报 ---
+    # DML002 原来对任何没写 LIMIT 的 UPDATE 都报，包括点写
+    ("UPDATE orders SET status='paid' WHERE id=123", "mysql", "DML002"),
+    ("UPDATE orders SET a=1 WHERE tenant_id=1 AND order_no='A1001'", "mysql", "DML002"),
+    ("DELETE FROM orders WHERE id IN (1,2,3)", "mysql", "DML002"),
+    # SUBQ001/002 原来不区分相关性，非相关子查询只算一次
+    ("SELECT id, (SELECT MAX(amount) FROM p) AS mx FROM o", "mysql", "SUBQ001"),
+    ("SELECT * FROM o WHERE id IN (SELECT oid FROM p)", "mysql", "SUBQ002"),
+    # TYPE001 原来对日期列、文本列、非数字字面量也报
+    ("SELECT * FROM t WHERE created_at = '2026-01-01'", "mysql", "TYPE001"),
+    ("SELECT * FROM t WHERE stat_date >= '2026-01-01'", "mysql", "TYPE001"),
+    ("SELECT * FROM t WHERE order_no = '12345'", "mysql", "TYPE001"),
+    ("SELECT * FROM t WHERE status = '1'", "mysql", "TYPE001"),
+    ("SELECT id FROM u WHERE phone = '13800138000'", "mysql", "TYPE001"),
 ]
 for sql, dia, rid in fp_cases:
     got = rules_of(sql, dia)
@@ -97,6 +118,22 @@ for sql, dia, rid in fp_cases:
 # CTE 修复不能把真笛卡尔积一起放过
 check("CTE 与真表无关联仍报笛卡尔积",
       "JOIN002" in rules_of("WITH t AS (SELECT id FROM x) SELECT * FROM t, y", "mysql"))
+
+# 误报治理不能把该报的也放过（反向用例）
+check("点写抑制 DML002，但 id 带引号仍报隐式转换",
+      rules_of("UPDATE orders SET status='paid' WHERE id='123'", "mysql") == {"TYPE001"},
+      str(rules_of("UPDATE orders SET status='paid' WHERE id='123'", "mysql")))
+check("小表不报 DML002",
+      "DML002" not in rules_of("UPDATE t SET a=1 WHERE status='x'", "mysql", table_rows=500))
+check("大表仍报 DML002",
+      "DML002" in rules_of("UPDATE t SET a=1 WHERE status='x'", "mysql", table_rows=5_000_000))
+check("相关与非相关子查询分得开",
+      "SUBQ002" in rules_of(
+          "SELECT * FROM o WHERE id IN (SELECT oid FROM p WHERE p.uid=o.uid)", "mysql")
+      and "SUBQ002" not in rules_of("SELECT * FROM o WHERE id IN (SELECT oid FROM p)", "mysql"))
+check("隐式转换错例（字符串给了数值列）仍报 low",
+      any(f.rule_id == "TYPE001" and f.severity == "low"
+          for f in review_sql("SELECT * FROM t WHERE id = 'abc'", "mysql").findings))
 
 # 分区键
 r_part = review_sql("SELECT * FROM orders WHERE amount > 10", "mysql",

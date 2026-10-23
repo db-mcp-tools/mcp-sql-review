@@ -6,43 +6,57 @@ import re
 
 from sqlglot import exp
 
-from sql_review.rulebook.core import (_NUMERIC_COL_RE, _literal_of, _mk, table_of)
+from sql_review.rulebook.core import (_NUMERIC_COL_RE, _mk, table_of)
+from sql_review.rulebook.heuristics import is_date_like, is_text_like
+
+# 字面量是不是"数字形态"：纯整数或小数（含正负号）。
+# `'2026-01-01'`、`'abc'` 都不算 —— 对数值列来说那是类型错误，
+# 不是隐式转换，报"加引号导致索引失效"帮不上忙。
+_NUM_LITERAL_RE = re.compile(r"^[+-]?\d+(\.\d+)?$")
 
 
 def rule_implicit_cast(ast, ctx) -> list:
-    """数字型字段与字符串字面量比较 —— 会导致整列隐式转换，索引失效。"""
+    """数值列与字符串字面量比较 —— 数据库对**列**做 CAST，索引失效。
+
+    误报治理（见 heuristics.py 顶部）：只有三类列会被报
+
+      · 日期时间列（`*_at` / `*_date` / `*_ts` …）→ 直接跳过。
+        带引号写日期是标准写法，SQL 没有通用日期字面量。
+      · 文本列（`*_name` / `*_code` / `*_no` / `status` …）→ 直接跳过。
+        与字符串比较本来就对；`order_no = '12345'` 不是问题。
+      · 其余列：字面量是数字形态且列名带数值特征（`*_id` / `amount` / `count`…）
+        → high；否则 low（"需确认"，不断言）。
+    """
     out: list = []
     where = ast.args.get("where") if isinstance(ast, (exp.Select, exp.Update, exp.Delete)) else None
     if where is None:
         return out
-    seen: set[str] = set()
     for node in where.walk():
-        if isinstance(node, (exp.EQ, exp.In, exp.GTE, exp.LTE, exp.GT, exp.LT)):
-            col = node.find(exp.Column)
-            lit = node.find(exp.Literal)
-            if col is None or lit is None:
-                continue
-            # ★ 只有字符串字面量才可能是隐式转换；数字字面量发改我们要自己学会分辨
-            if not getattr(lit, "is_string", False):
-                continue
-            raw = getattr(lit, "this", None)
-            if not isinstance(raw, str):
-                continue
-            # 疑似数值列：列名的常见数值后缀，或字面量是纯数字
-            colname = col.name or ""
-            looks_numeric = raw.isdigit() and bool(
-                re.search(r"(^|_)(id|_id|no|num|count|qty|amount|total|seq|coin|score)$", colname, re.I)
-            ) or (raw.isdigit() and re.fullmatch(r"\d+", raw) and colname.lower() in
-                  ("id", "uid", "user_id", "order_id"))
-            # 只有列名带数值特征时才敢判 high（我们不知道真实列类型）；
-            # 否则降到 low，作为"需要确认"的提示，避免对字符列乱报
-            colname = col.name or ""
-            numeric_name = bool(_NUMERIC_COL_RE.search(colname))
-            out.append(_mk("TYPE001", "high" if numeric_name else "low",
-                           f"列 `{colname}` 与字符串字面量 '{raw}' 比较，"
-                           f"若该列是数值类型会触发隐式转换使索引失效",
-                           "去掉引号：让字面量类型与列类型一致；MySQL/PG 都会对列做 CAST 而非对常量做 CAST",
-                           node, table_of(ast)))
+        if not isinstance(node, (exp.EQ, exp.In, exp.GTE, exp.LTE, exp.GT, exp.LT)):
+            continue
+        col = node.find(exp.Column)
+        lit = node.find(exp.Literal)
+        if col is None or lit is None:
+            continue
+        # 只有字符串字面量才可能是隐式转换
+        if not getattr(lit, "is_string", False):
+            continue
+        raw = getattr(lit, "this", None)
+        if not isinstance(raw, str):
+            continue
+
+        colname = col.name or ""
+        if is_date_like(colname) or is_text_like(colname):
+            continue
+        numeric_literal = bool(_NUM_LITERAL_RE.match(raw.strip()))
+        numeric_name = bool(_NUMERIC_COL_RE.search(colname))
+        severity = "high" if (numeric_name and numeric_literal) else "low"
+        out.append(_mk("TYPE001", severity,
+                       f"列 `{colname}` 与字符串字面量 '{raw}' 比较，"
+                       f"若该列是数值类型会触发隐式转换使索引失效",
+                       "去掉引号：让字面量类型与列类型一致；"
+                       "MySQL/PG 都会对列做 CAST 而不是对常量做 CAST",
+                       node, table_of(ast)))
     return out
 
 
@@ -95,7 +109,9 @@ def rule_not_null_safe(ast, ctx) -> list:
 META: dict[str, dict] = {
     "TYPE001": {"name": "隐式类型转换", "category": "type", "severity": "high",
                 "why": "数值列与字符串比较，数据库会对列做 CAST，索引直接失效",
-                "false_positive": "列本身是字符类型且存的就是数字串（设计问题，应改类型）"},
+                "false_positive": "日期时间列（'2026-01-01' 是标准写法）；"
+                                  "文本列（*_name / *_code / *_no / status 等）；"
+                                  "非数字字面量（那是类型用错，不是隐式转换）"},
     "TYPE002": {"name": "否定条件", "category": "type", "severity": "low",
                 "why": "!= / NOT IN 的选择性通常很差，索引收益有限",
                 "false_positive": "列只有极少数值且分布极度倾斜时"},

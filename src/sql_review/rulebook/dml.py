@@ -12,6 +12,11 @@ import re
 from sqlglot import exp
 
 from sql_review.rulebook.core import _mk, table_of
+from sql_review.rulebook.heuristics import is_point_write
+
+# 表行数低于这个值，全表改写也不构成"大事务"，DML002 不报。
+# 可通过 review_sql(table_rows=...) 传入真实行数；不传则按 SQL 形态判断。
+SMALL_TABLE_ROWS = 10_000
 
 
 def rule_dml_without_where(ast, ctx) -> list:
@@ -41,7 +46,19 @@ def rule_insert_without_columns(ast, ctx) -> list:
 
 
 def rule_batch_dml(ast, ctx) -> list:
-    """批量 UPDATE/DELETE 没有 LIMIT —— 大事务风险。"""
+    """批量 UPDATE/DELETE 没有 LIMIT —— 大事务风险。
+
+    误报治理（见 heuristics.py 顶部说明）：这不是"没写 LIMIT 就报"，
+    而是"影响行数可能不可控才报"。两种明确可控的情况不报：
+
+      · 点写：`WHERE id = ?` / `WHERE tenant_id = ? AND order_no = ?`
+        —— 等值命中键列，影响行数是个位数
+      · 已知小表：ctx 里给了 table_rows 且 <= SMALL_TABLE_ROWS
+        —— 几千行就算全表扫也不构成大事务
+
+    仍然要报的：范围条件、OR、函数包裹、子查询、以及只按非键列等值过滤
+    （`WHERE status = 'x'` 真的可能改掉半张表）。
+    """
     if not isinstance(ast, (exp.Update, exp.Delete)):
         return []
     if ast.args.get("limit") is not None:
@@ -49,10 +66,16 @@ def rule_batch_dml(ast, ctx) -> list:
     where = ast.args.get("where")
     if where is None:
         return []                                       # 无 WHERE 由 DML001 拦截，避免重复报
+    if is_point_write(where):
+        return []
+    rows = ctx.get("table_rows")
+    if isinstance(rows, int) and 0 <= rows <= SMALL_TABLE_ROWS:
+        return []
     return [_mk("DML002", "medium",
                 f"批量 {type(ast).__name__.upper()} 没有 LIMIT：影响行数不可控，"
                 f"可能产生大事务（长锁持有、undo 膨胀、主从延迟）",
-                "改为分批执行：每批 <= 5000 行，批间 sleep 50~200ms，且必须能安全重试",
+                "改为分批执行：每批 <= 5000 行，批间 sleep 50~200ms，且必须能安全重试；"
+                "若确认是点写（等值命中主键/唯一键）可忽略本条",
                 ast, table_of(ast))]
 
 
@@ -153,7 +176,8 @@ META: dict[str, dict] = {
                "false_positive": "TRUNCATE 意图的重命名类操作；但即便如此也应显式确认"},
     "DML002": {"name": "批量写操作无分批", "category": "dml", "severity": "medium",
                "why": "单次影响行数不可控，产生大事务：长锁、undo 膨胀、主从延迟",
-               "false_positive": "已确认影响行数很少"},
+               "false_positive": "点写（WHERE 等值命中主键/唯一键，影响个位数行）；"
+                                 "已知表行数 ≤ 10000；已确认影响面很小"},
     "DML003": {"name": "INSERT 缺少列清单", "category": "dml", "severity": "medium",
                "why": "表结构变更后 INSERT 会错位或失败",
                "false_positive": "无"},
