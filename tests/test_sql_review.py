@@ -25,7 +25,6 @@ os.environ.setdefault("DBT_LOG_LEVEL", "ERROR")
 _TMPDIR = tempfile.mkdtemp(prefix="dbt-sql_review-")
 os.environ.setdefault("DBT_STORE", os.path.join(_TMPDIR, "store.db"))
 
-from dbcore.protocol import Result, ToolError  # noqa: E402
 
 PASSED: list[str] = []
 FAILED: list[str] = []
@@ -281,6 +280,63 @@ _rk = rank_candidates(["uid", "status", "created_at"],
 check("advisor：高选择性排前", _rk[0]["column"] == "uid")
 check("advisor：无选择性数据标注未验证",
       _rk[-1]["column"] == "created_at" and _rk[-1]["verified"] is False)
+
+
+# ==================================================================
+section("P2 finding 规范化（line/col + 阻断分级 + 可修性）")
+# ------------------------------------------------------------------
+# 评测关注：①问题定位到行+列 ②严重级别（阻断/提示）③是否可自动修
+from sql_review.rules import review_sql as _review
+
+# 阻断分级：笛卡尔积（JOIN002 为 blocker）应使 has_blocking=True
+_r = _review("SELECT a.id FROM a JOIN b", "mysql")
+_r_ids = {f.rule_id for f in _r.findings}
+check("JOIN002 阻断级规则触发", "JOIN002" in _r_ids, str(_r_ids))
+check("存在 blocker → has_blocking=True", _r.has_blocking is True)
+check("blocking_count >= 1", _r.blocking_count >= 1, str(_r.blocking_count))
+check("含 blocker 的 verdict=禁止上线", _r.verdict == "禁止上线", _r.verdict)
+# 每条 finding 都带结构化定位字段
+for _f in _r.findings:
+    check(f"{_f.rule_id} 有 line 定位", isinstance(_f.line, int), str(_f.line))
+    check(f"{_f.rule_id} 有 col 定位", isinstance(_f.col, int), str(_f.col))
+    check(f"{_f.rule_id} 有 table", bool(_f.table), str(_f.table))
+
+# 干净查询：无阻断、verdict 通过/可上线
+_r2 = _review("SELECT id FROM t WHERE id = 1", "mysql")
+check("干净查询无阻断", _r2.has_blocking is False)
+check("干净查询 verdict 通过/可上线", _r2.verdict in ("通过", "可上线"), _r2.verdict)
+
+# 可修性：MY001（确定性机械改写）应提供 auto_fix
+_r3 = _review("ALTER TABLE t ADD COLUMN c INT", "mysql")
+_my = [f for f in _r3.findings if f.rule_id == "MY001"]
+check("MY001 触发", bool(_my), str(_r3.findings))
+if _my:
+    check("MY001 fixable=True", _my[0].fixable is True)
+    check("MY001 auto_fix 含 ALGORITHM", "ALGORITHM" in (_my[0].auto_fix or ""), _my[0].auto_fix)
+    _r3b = _review(_my[0].auto_fix, "mysql")
+    check("MY001 auto_fix 自洽（不再报 MY001）",
+          not any(f.rule_id == "MY001" for f in _r3b.findings), str(_r3b.findings))
+
+# 可修性：PG001 提供 auto_fix
+_r4 = _review("CREATE INDEX idx ON t(c)", "postgres")
+_pg = [f for f in _r4.findings if f.rule_id == "PG001"]
+check("PG001 触发", bool(_pg), str(_r4.findings))
+if _pg:
+    check("PG001 fixable=True", _pg[0].fixable is True)
+    check("PG001 auto_fix 含 CONCURRENTLY", "CONCURRENTLY" in (_pg[0].auto_fix or ""), _pg[0].auto_fix)
+    _r4b = _review(_pg[0].auto_fix, "postgres")
+    check("PG001 auto_fix 自洽（不再报 PG001）",
+          not any(f.rule_id == "PG001" for f in _r4b.findings), str(_r4b.findings))
+
+# 不过度承诺：绝大多数规则不可自动修（对标 FSE「自动修复是弱环」）
+_fixable_ids = {f.rule_id for f in (_r.findings + _r3.findings + _r4.findings) if f.fixable}
+check("仅确定性规则可修（<=2 条）", len(_fixable_ids) <= 2, str(_fixable_ids))
+check("非确定性规则默认不可修", not any(f.fixable for f in _r.findings), str(_r_ids))
+
+# to_dict 暴露新字段
+_d = _r.to_dict()
+for _k in ("blocking_count", "advisory_count", "fixable_count", "has_blocking"):
+    check(f"to_dict 含 {_k}", _k in _d, str(list(_d.keys())))
 
 
 # ==================================================================

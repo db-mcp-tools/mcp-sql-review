@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import re
 
-from sqlglot import exp
-
 from sql_review.rulebook.core import _mk, table_of
 
 
@@ -24,7 +22,8 @@ def rule_pg_index(ast, ctx) -> list:
         return [_mk("PG001", "high",
                     "PG 中 CREATE INDEX 默认持有 SHARE 锁，期间该表无法写入",
                     "改为 CREATE INDEX CONCURRENTLY（注意：它不能放在事务块里，"
-                    "且失败后会留下 INVALID 索引需要手动清理）", ast, table_of(ast))]
+                    "且失败后会留下 INVALID 索引需要手动清理）", ast, table_of(ast),
+                    auto_fix=_auto_fix_pg001(sql_text))]
     return []
 
 
@@ -53,7 +52,8 @@ def rule_mysql_alter(ast, ctx) -> list:
                     "ALTER TABLE 未指定 ALGORITHM/LOCK：不同版本默认行为差异很大，"
                     "5.6 上很多操作会 COPY 整表",
                     "显式指定 ALGORITHM=INSTANT/INPLACE, LOCK=NONE；"
-                    "不支持时用 gh-ost / pt-osc", ast, table_of(ast))]
+                    "不支持时用 gh-ost / pt-osc", ast, table_of(ast),
+                    auto_fix=_auto_fix_my001(sql_text))]
     return []
 
 
@@ -77,3 +77,19 @@ META: dict[str, dict] = {
               "false_positive": "8.0 且确认支持 INSTANT",
               "engines": ["mysql", "mariadb", "oceanbase", "tidb"]},
 }
+
+
+def _auto_fix_my001(sql_text: str) -> str:
+    """确定性机械改写：在 ALTER TABLE 语句末尾追加优化/锁提示子句。
+
+    不改动任何逻辑，仅补 ALGORITHM/LOCK 提示（INSTANT 不支持时上层应改 gh-ost）。
+    """
+    s = (sql_text or "").strip()
+    if s.endswith(";"):
+        return s[:-1].rstrip() + " ALGORITHM=INPLACE, LOCK=NONE;"
+    return s + " ALGORITHM=INPLACE, LOCK=NONE"
+
+
+def _auto_fix_pg001(sql_text: str) -> str:
+    """确定性机械改写：CREATE INDEX → CREATE INDEX CONCURRENTLY。"""
+    return re.sub(r"\bCREATE\s+INDEX\b", "CREATE INDEX CONCURRENTLY", sql_text or "", flags=re.I)
