@@ -13,4 +13,5 @@ venv/
 .ruff_cache/
 .coverage
 htmlcov/
+bench/bench_report.json
 .DS_Store
