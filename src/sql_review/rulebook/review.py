@@ -20,6 +20,7 @@ def review_sql(sql: str, dialect: str | None = None, *,
                only_categories: list[str] | None = None,
                only_severities: list[str] | None = None,
                custom_rules: list[dict] | list[Rule] | None = None,
+               semantic: bool | dict | Any = False,
                **opts) -> Any:
     """对一段 SQL（可多句）做静态体检。
 
@@ -31,6 +32,9 @@ def review_sql(sql: str, dialect: str | None = None, *,
     only_categories / only_severities: 临时把生效集收窄到指定分类/严重度。
     custom_rules: 自定义规则（P5 DSL）。传 dict 列表时自动 compile_rules 校验编译，
         传 Rule 对象列表则原样使用；与内置规则一起执行，id 冲突会直接报错。
+    semantic: 语义校验层（P4）。False=不触发（默认，保证精度门禁不变）；
+        True=跑确定性 SEM* 检查（零密钥）；dict={"provider": <LLMSemanticProvider>}
+        或显式传入 provider 实例=额外跑可选 LLM 复核（仅建议，永不阻断）。
     **opts: 透传给规则上下文，如 partition_keys / deep_offset_threshold / table_rows。
     """
     from sql_review.rulebook.core import Finding, ReviewResult  # 延迟避免环
@@ -83,6 +87,18 @@ def review_sql(sql: str, dialect: str | None = None, *,
             continue
         for rule in active:
             result.findings.extend(rule.fn(stmt.ast, ctx))
+
+    # 语义校验层（P4）：默认关闭；开启后确定性 SEM* 常驻，LLM 仅建议、永不阻断
+    if semantic:
+        sem_provider = None
+        if isinstance(semantic, dict):
+            sem_provider = semantic.get("provider")
+        elif not isinstance(semantic, bool):
+            sem_provider = semantic  # 直接传入 LLMSemanticProvider 实例
+        from sql_review.rulebook.semantic import semantic_review
+        sem = semantic_review(sql, d, provider=sem_provider, opts=ctx)
+        result.findings.extend(sem["findings"])
+        result.semantic_meta = sem  # 透出 ran_llm / provider 等元信息
 
     result.findings = _dedup_findings(result.findings)
     result.findings.sort(key=lambda f: _severity_key(f.severity))

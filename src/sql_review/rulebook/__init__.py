@@ -20,6 +20,14 @@ from sql_review.rulebook.review import (  # noqa: F401
     review_sql,
     rule_categories,
 )
+from sql_review.rulebook.semantic import (  # noqa: F401
+    SEMANTIC_META,
+    OpenAIProvider,
+    NoProvider,
+    StubProvider,
+    get_default_provider,
+    semantic_review,
+)
 from sql_review.rulebook.registry import build as _build  # noqa: F401
 
 # 供旧 sql_review.rules 薄壳再导出

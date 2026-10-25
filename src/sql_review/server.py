@@ -56,7 +56,8 @@ def review_sql(sql: str, dialect: str = "mysql", table_rows: int | None = None,
                instance_id: str = "", correlation_id: str = "",
                deep_offset_threshold: int = 1000, profile: str = "default",
                disable: list[str] | None = None, enable: list[str] | None = None,
-               custom_rules: list[dict] | None = None) -> Result:
+               custom_rules: list[dict] | None = None,
+               semantic: bool = False) -> Result:
     """静态体检。不需要连库，最适合挂 CI。返回 verdict + findings。
 
     profile: 规则配置（default / lenient / ci-gate / bank-core），决定启用哪些规则。
@@ -64,12 +65,14 @@ def review_sql(sql: str, dialect: str = "mysql", table_rows: int | None = None,
     enable:  本次强制启用的规则 ID（优先级最高，即便被 profile 过滤也生效）。
     custom_rules: 自定义规则清单（声明式 DSL，见 docs/ARCHITECTURE.md），
         每条 {"id","name","severity",matcher...}；与内置规则一起执行。
+    semantic: 语义校验层（P4）。True=额外跑确定性语义检查（零密钥）；LLM 复核需另行配置
+        环境变量 DBT_LLM_PROVIDER。语义层产出一律 advisory，永不触发阻断门禁。
     """
     d = normalize_dialect(dialect)
     r = RULES.review_sql(sql, d, table_rows=table_rows,
                          deep_offset_threshold=deep_offset_threshold,
                          profile=profile, disable=disable, enable=enable,
-                         custom_rules=custom_rules)
+                         custom_rules=custom_rules, semantic=semantic)
     data = r.to_dict()
     data["findings"] = [{**f, "severity_norm": _norm_sev(f["severity"])} for f in data["findings"]]
     data["profile"] = profile
@@ -102,6 +105,9 @@ def review_sql(sql: str, dialect: str = "mysql", table_rows: int | None = None,
                  reason="这些问题可以自动给出改法", priority=1, optional=False)
     if any(f["severity"] in ("blocker", "high") for f in data["findings"]):
         res.warn("存在 blocker/high 级问题，不建议直接上线")
+    if data.get("semantic") and data["semantic"].get("ran_llm"):
+        res.add_evidence("llm", "semantic.llm", "已运行 LLM 语义复核（仅建议，未计入门禁）",
+                         f"provider={data['semantic'].get('provider')}")
     return res
 
 
@@ -114,18 +120,20 @@ def review_batch(sqls: list[str], dialect: str = "mysql", fail_on: str = "critic
                  instance_id: str = "", correlation_id: str = "",
                  profile: str = "default", disable: list[str] | None = None,
                  enable: list[str] | None = None,
-                 custom_rules: list[dict] | None = None) -> Result:
+                 custom_rules: list[dict] | None = None,
+                 semantic: bool = False) -> Result:
     """批量体检，输出 PASS/FAIL 门禁结论。fail_on 可选 critical|high|medium|low
 
-    profile / disable / enable / custom_rules 透传给每条 SQL 的体检，
-    便于在 CI 里按项目定制门禁。
+    profile / disable / enable / custom_rules / semantic 透传给每条 SQL 的体检，
+    便于在 CI 里按项目定制门禁。语义层永不计入阻断判定（fail_on 只认 blocker）。
     """
     results = []
     for s in sqls:
         try:
             dd = RULES.review_sql(s, dialect, profile=profile,
                                   disable=disable, enable=enable,
-                                  custom_rules=custom_rules).to_dict()
+                                  custom_rules=custom_rules,
+                                  semantic=semantic).to_dict()
         except Exception as exc:
             dd = {"verdict": "unknown", "statement_count": 0, "unparsable": [s[:100]],
                   "findings": [{"rule_id": "PARSE000", "severity": "info", "line": None,

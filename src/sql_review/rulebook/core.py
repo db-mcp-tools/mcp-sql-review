@@ -36,6 +36,7 @@ class Finding:
     table: str | None = None
     col: int | None = None
     auto_fix: str | None = None
+    source: str | None = None  # None=内置规则；"semantic"=确定性语义检查；"llm"=LLM 复核
 
     @property
     def fixable(self) -> bool:
@@ -60,6 +61,7 @@ class ReviewResult:
     statement_count: int = 0
     unparsable: list[str] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    semantic_meta: dict | None = None  # P4：语义层元信息（ran_llm / provider 等）
 
     @property
     def max_severity(self) -> str | None:
@@ -104,6 +106,11 @@ class ReviewResult:
         """CI 门禁用：存在任一阻断级 finding 即判失败。"""
         return self.blocking_count > 0
 
+    @property
+    def semantic_findings(self) -> list[Finding]:
+        """语义层（确定性 SEM* 或 LLM 复核 AI*）产出的建议，绝不进入阻断判定。"""
+        return [f for f in self.findings if f.source in ("semantic", "llm")]
+
     def to_dict(self) -> dict:
         return {
             "dialect": self.dialect,
@@ -115,6 +122,7 @@ class ReviewResult:
             "advisory_count": self.advisory_count,
             "fixable_count": self.fixable_count,
             "has_blocking": self.has_blocking,
+            "semantic": self.semantic_meta,
             "unparsable": self.unparsable,
             "findings": [f.to_dict() for f in self.findings],
         }
@@ -125,10 +133,10 @@ RuleFn = Callable[[object, dict], list[Finding]]
 
 def _mk(rule_id: str, severity: str, message: str, suggestion: str,
         node: exp.Expression | None, table: str | None = None,
-        auto_fix: str | None = None) -> Finding:
+        auto_fix: str | None = None, source: str | None = None) -> Finding:
     return Finding(rule_id=rule_id, severity=severity, message=message,
                    suggestion=suggestion, line=line_of(node), col=col_of(node),
-                   table=table, auto_fix=auto_fix)
+                   table=table, auto_fix=auto_fix, source=source)
 
 
 def _dedup_findings(findings: list[Finding]) -> list[Finding]:
