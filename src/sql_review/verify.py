@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from dbcore.connectors import explain
+from dbcore.connectors import explain, ConnectionSpec
 from dbcore.dialect import normalize_dialect
 
 _ALL_TABLE_ACCESS = ("ALL", "index")
@@ -44,33 +44,41 @@ def _mysql_metrics(result: dict) -> dict:
 
 
 def _pg_metrics(result: dict) -> dict:
-    text = result.get("plan_text", "")
+    # canonical 的 explain 已把计划解析成结构化 result["plan"]，优先用其 flags/totals；
+    # 旧代码读 result["plan_text"]，而 PG EXPLAIN 返回的是单列 QUERY PLAN 文本行，
+    # 根本没有 plan_text 键，导致 full_scan 永远为 False。
+    plan = result.get("plan") or {}
+    flags = plan.get("flags") or {}
+    totals = plan.get("totals") or {}
+    text = result.get("plan_text")
+    if not text:
+        rows = result.get("rows") or []
+        text = "\n".join(str(r[0]) for r in rows if r) if rows else ""
     low = text.lower()
-    rows = [int(n.replace(",", "")) for n in re.findall(r"rows=(\d+)", low)]
     return {
         "engine": "postgres",
         "steps": [],
-        "estimated_rows": max(rows) if rows else 0,
-        "full_scan": "seq scan" in low,
-        "filesort": "sort" in low and "sort key" in low,
-        "temporary": "temporary" in low or "external merge" in low,
+        "estimated_rows": totals.get("rows_examined") or 0,
+        "full_scan": bool(flags.get("full_scan")) or ("seq scan" in low),
+        "filesort": bool(flags.get("filesort")) or ("sort" in low and "sort key" in low),
+        "temporary": bool(flags.get("temp_table")) or ("temporary" in low or "external merge" in low),
         "plan_text": text,
     }
 
 
 def plan_metrics(url: str, sql: str, dialect: str | None = None, analyze: bool = False) -> dict:
-    d = normalize_dialect(dialect)
-    if d not in ("mysql", "postgres"):
-        d = "mysql"
-    result = explain(url, sql, d, analyze=analyze)
-    return _mysql_metrics(result) if d == "mysql" else _pg_metrics(result)
+    # 直接把 dialect 透传给 explain，由它按 URL 推断驱动（dialect=None 时不再默认 mysql）。
+    result = explain(url, sql, dialect, analyze=analyze)
+    engine = (result.get("plan") or {}).get("engine")
+    if engine not in ("mysql", "postgres"):
+        engine = ConnectionSpec(url).driver
+    return _mysql_metrics(result) if engine == "mysql" else _pg_metrics(result)
 
 
 def plan_compare(url: str, before_sql: str, after_sql: str, dialect: str | None = None, analyze: bool = False) -> dict:
     """对比改写前后的执行计划，输出「是否真的变好了」的结论。"""
-    d = normalize_dialect(dialect)
-    before = plan_metrics(url, before_sql, d, analyze=analyze)
-    after = plan_metrics(url, after_sql, d, analyze=analyze)
+    before = plan_metrics(url, before_sql, dialect, analyze=analyze)
+    after = plan_metrics(url, after_sql, dialect, analyze=analyze)
 
     gains: list[str] = []
     if before["full_scan"] and not after["full_scan"]:
@@ -102,7 +110,7 @@ def equivalence_check(url: str, before_sql: str, after_sql: str, dialect: str | 
     """
     from dbcore.connectors import run_readonly
 
-    d = normalize_dialect(dialect)
+    d = dialect
 
     def count_of(sql: str) -> dict:
         wrapped = f"SELECT COUNT(*) AS cnt FROM ({sql.rstrip().rstrip(';')}) AS _dbt_probe"
