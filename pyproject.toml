@@ -45,10 +45,10 @@ postgres = ["psycopg[binary]>=3.1"]
 mcp-sql-review = "sql_review.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Apollo-lwx/mcp-sql-review"
-Repository = "https://github.com/Apollo-lwx/mcp-sql-review"
-Issues = "https://github.com/Apollo-lwx/mcp-sql-review/issues"
-Changelog = "https://github.com/Apollo-lwx/db-ai-toolchain/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/db-mcp-tools/mcp-sql-review"
+Repository = "https://github.com/db-mcp-tools/mcp-sql-review"
+Issues = "https://github.com/db-mcp-tools/mcp-sql-review/issues"
+Changelog = "https://github.com/db-mcp-tools/db-ai-toolchain/blob/master/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
